@@ -3,12 +3,22 @@ import numpy as np
 import itertools
 import ast
 
+
+def discritize(df):
+    for i in df.columns.values[:-1]:
+        if len(df[i].unique()) > 10:
+            column = df[i].to_list()
+            bin_vals = []
+            disc_val = (max(column) - min(column))/5
+            for k in range(6):
+                bin_vals.append(min(column)+disc_val*k)
+            df[i] = np.digitize(np.array(column),bin_vals)
+    return df
 def  gini_impurity(y):
     p1 = len(y[y == 1])/len(y)
     p0 = len(y[y == 0])/len(y)
     return (1 - p1 ** 2 - p0 ** 2)
 def entropy(y):
-    # y = list(y)
     p1 = len(y[y == 1])/len(y)
     p0 = len(y[y == 0])/len(y)
     return(-p1 * np.log2(p1 + 1e-9) - p0 * np.log2(p0 + 1e-9))
@@ -34,20 +44,13 @@ def best_split(x,y,func):
     ig_list = []
     cut_list = []
 
-    if len(x.unique()) < 10:
-        options = categorical_options(x)
-        for val in options:
-            cut = x.isin(val)
-            ig = information_gain(y,cut,func)
-            ig_list.append(ig)
-            cut_list.append(val)
-    else:
-        options = x.sort_values().unique()[1:] # for not taking the first value
-        for val in options:
-            cut = x < val
-            ig = information_gain(y,cut,func)
-            ig_list.append(ig)
-            cut_list.append(val)
+    options = categorical_options(x)
+    for val in options:
+        cut = x.isin(val)
+        ig = information_gain(y,cut,func)
+        ig_list.append(ig)
+        cut_list.append(val)
+
     if len(ig_list) == 0:
         max_ig =0
         best_cut = None
@@ -76,15 +79,11 @@ def data_best_split(data,func):
     return best_ig , best_cut_value , best_variable
 
 def split(feature,x,cut_value):
-    if len(x[feature].unique()) < 10:
-        left_data = x[x[feature].isin(cut_value)]
-        right_data = x[~x[feature].isin(cut_value)]
-        categorical_feature = True
-    else:
-        left_data = x[ x[feature]< cut_value]
-        right_data = x[ x[feature] >= cut_value]
-        categorical_feature = False
-    return left_data, right_data , categorical_feature
+
+    left_data = x[x[feature].isin(cut_value)]
+    right_data = x[~x[feature].isin(cut_value)]
+
+    return left_data, right_data
 
 
 def train_data(data,func,max_depth = 5, depth = 0):
@@ -92,12 +91,9 @@ def train_data(data,func,max_depth = 5, depth = 0):
     if depth < max_depth:
         ig, cut_value, cut_variable = data_best_split(data,func)
         if ig > 1e-9:
-            right_data , left_data , categorical_feature = split(cut_variable,data,cut_value)
+            right_data , left_data = split(cut_variable,data,cut_value)
             depth += 1
-            if categorical_feature:
-                split_condition = "in"
-            else:
-                split_condition = "<"
+            split_condition = "in"
             condition =   "{}${}${}".format(cut_variable,split_condition,cut_value)
             subtree = {condition: []}
             split_lift = train_data(left_data,func ,max_depth,depth)
@@ -117,17 +113,13 @@ def train_data(data,func,max_depth = 5, depth = 0):
     return subtree
 
 def predict_singel_value(x,tree):
+
     condition = list(tree.keys())[0]
-    if condition.split("$")[1] == "in":
-        if x[condition.split("$")[0]] in ast.literal_eval(condition.split("$")[2]):
-            answer = tree[condition][0]
-        else:
-            answer = tree[condition][1]
+    if x[condition.split("$")[0]] in ast.literal_eval(condition.split("$")[2]):
+        answer = tree[condition][0]
     else:
-        if x[condition.split("$")[0]] < float(condition.split("$")[2]):
-            answer = tree[condition][0]
-        else:
-            answer = tree[condition][1]
+        answer = tree[condition][1]
+
     if type(answer) is dict:
         return predict_singel_value(x,answer)
     else:
@@ -145,4 +137,12 @@ def predict(data,tree):
 def get_accuracy(predicted_values,y):
     return list(predicted_values == y).count(1)/len(predicted_values)
     
-
+if __name__ == "__main__":
+    data = pd.read_csv("cardio_train.csv", sep = ";")
+    data = discritize(data)
+    data_train = data.iloc[0:6300,1:]
+    data_test =  data.iloc[6300:7000,1:]
+    gini_tree = train_data(data_train , gini_impurity,max_depth= 10)
+    gini_predicted_values = predict(data_test.iloc[:,:-1], gini_tree)
+    print(gini_tree)
+    print(get_accuracy(gini_predicted_values,data_test.iloc[:,-1]))
